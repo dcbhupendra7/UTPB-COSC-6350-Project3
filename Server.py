@@ -2,6 +2,7 @@ import socket
 from concurrent.futures import ThreadPoolExecutor
 from Crypto import *
 import time
+import random
 
 # Constants
 HOST = '0.0.0.0'
@@ -25,21 +26,32 @@ def handle_client(conn, addr):
                 byte = dat_file.read(1)[0]
                 crumbs += decompose_byte(byte)
 
-        # Start sending packets to the client
-        for crumb in crumbs:
+        # Start sending packets to the client, two bits at a time
+        for i, crumb in enumerate(crumbs):
             key = keys[crumb]
             message = "The quick brown fox jumps over the lazy dog."
             encrypted_packet = aes_encrypt(message, key)
-            conn.sendall(encrypted_packet)
+            ack_received = False
 
-            # Wait for acknowledgment
-            ack = conn.recv(1024)
-            if ack.decode('utf-8') != 'ACK':
-                print(f"[WARN] No ACK received from {addr}. Resending packet...")
-                time.sleep(1)  # Delay before resending
+            while not ack_received:
                 conn.sendall(encrypted_packet)
-            else:
-                print(f"[INFO] Packet acknowledged by {addr}.")
+
+                # Wait for acknowledgment
+                try:
+                    ack = conn.recv(1024)
+                    if ack.decode('utf-8') == 'ACK':
+                        print(f"[INFO] Packet {i} acknowledged by {addr}.")
+                        ack_received = True
+                    else:
+                        print(f"[WARN] No ACK received from {addr} for packet {i}. Resending...")
+                        time.sleep(1)  # Delay before resending
+                except socket.timeout:
+                    print(f"[WARN] Timeout waiting for ACK from {addr} for packet {i}. Resending...")
+                    time.sleep(1)  # Delay before resending
+
+        # Send end of transmission message
+        conn.sendall(b'END')
+        print(f"[INFO] All packets sent. End of transmission signal sent to {addr}.")
     except Exception as e:
         print(f"[ERROR] Error handling client {addr}: {e}")
     finally:

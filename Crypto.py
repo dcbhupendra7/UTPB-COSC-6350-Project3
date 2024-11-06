@@ -5,10 +5,10 @@ import os
 
 # Define four AES keys to be used for encryption and decryption (in bytes)
 keys = {
-    0b00: b'\xd7\xff\xe8\xf1\x0f\x12\x4c\x56\x91\x8a\x61\x4a\xcf\xc6\x58\x14',
-    0b01: b'\x55\x26\x73\x6d\xdd\x6c\x4a\x05\x92\xed\x33\xcb\xc5\xb1\xb7\x6d',
-    0b10: b'\x88\x86\x3e\xef\x1a\x37\x42\x7e\xa0\xb8\x67\x22\x7f\x09\xa7\xc1',
-    0b11: b'\x45\x35\x5f\x12\x5d\xb4\x44\x9e\xb0\x74\x15\xe8\xdf\x5e\x27\xd4'
+    0b00: bytes.fromhex('d7ffe8f10f124c56918a614acfc65814'),  # 16 bytes (128 bits)
+    0b01: bytes.fromhex('5526736ddd6c4a0592ed33cbc5b1b76d'),  # 16 bytes (128 bits)
+    0b10: bytes.fromhex('88863eef1a37427ea0b867227f09a7c1'),  # 16 bytes (128 bits)
+    0b11: bytes.fromhex('45355f125db4449eb07415e8df5e27d4')   # 16 bytes (128 bits)
 }
 
 # Function to encrypt a string using AES
@@ -47,7 +47,7 @@ def aes_decrypt(ciphertext, key):
     # Return the original plaintext as a string
     return unpadded_data.decode()
 
-# Decomposes a byte into 4 pairs of 2 bits each
+# Decompose a byte into 4 pairs of 2 bits each
 def decompose_byte(byte):
     crumbs = []
     for _ in range(4):
@@ -56,6 +56,8 @@ def decompose_byte(byte):
         byte >>= 2
     return crumbs
 
-# Reconstructs a byte from 4 pairs of 2 bits
+# Reconstruct a byte from 4 pairs of 2 bits
 def recompose_byte(crumbs):
     return (crumbs[3] << 6) + (crumbs[2] << 4) + (crumbs[1] << 2) + crumbs[0]
+
+

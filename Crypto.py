@@ -59,5 +59,3 @@ def decompose_byte(byte):
 # Reconstruct a byte from 4 pairs of 2 bits
 def recompose_byte(crumbs):
     return (crumbs[3] << 6) + (crumbs[2] << 4) + (crumbs[1] << 2) + crumbs[0]
-
-

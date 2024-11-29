@@ -1,8 +1,5 @@
 import socket
 from concurrent.futures import ThreadPoolExecutor
-from Crypto import *
-import time
-import random
 
 # Constants
 HOST = '0.0.0.0'
@@ -10,50 +7,47 @@ PORT = 5555
 TIMEOUT = 600
 MAX_THREADS = 10
 
+# Placeholder for encryption keys and AES encryption function
+keys = {0: "key0", 1: "key1", 2: "key2", 3: "key3"}
+
+def aes_encrypt(message, key):
+    # Placeholder for actual AES encryption logic
+    return message.encode()
+
 # Function to handle client connection
 def handle_client(conn, addr):
     conn.settimeout(TIMEOUT)
-    print(f"[INFO] Connection from {addr} established.")
+    print("[INFO] Connection from {}:{} established.".format(addr[0], addr[1]))
     try:
-        # Load file and decompose into crumbs (bit pairs)
-        file_size = 0
-        crumbs = []
+        # Load message from risk.bmp file and decompose into crumbs (simulated packets)
         with open("risk.bmp", "rb") as dat_file:
             dat_file.seek(0, 2)
             file_size = dat_file.tell()
             dat_file.seek(0)
+            crumbs = []
             for _ in range(file_size):
-                byte = dat_file.read(1)[0]
-                crumbs += decompose_byte(byte)
+                byte = int.from_bytes(dat_file.read(1), 'big')
+                crumbs.append(byte % 4)  # Decompose into 4 types of crumbs
+        
+        total_packets = len(crumbs)
+        print("[INFO] Total packets to send: {}".format(total_packets))
 
-        # Start sending packets to the client, two bits at a time
+        # Start sending packets to the client
         for i, crumb in enumerate(crumbs):
             key = keys[crumb]
-            message = "The quick brown fox jumps over the lazy dog."
-            encrypted_packet = aes_encrypt(message, key)
-            ack_received = False
+            encrypted_packet = aes_encrypt("The quick brown fox jumps over the lazy dog.", key)
+            conn.sendall(encrypted_packet)
 
-            while not ack_received:
-                conn.sendall(encrypted_packet)
-
-                # Wait for acknowledgment
-                try:
-                    ack = conn.recv(1024)
-                    if ack.decode('utf-8') == 'ACK':
-                        print(f"[INFO] Packet {i} acknowledged by {addr}.")
-                        ack_received = True
-                    else:
-                        print(f"[WARN] No ACK received from {addr} for packet {i}. Resending...")
-                        time.sleep(1)  # Delay before resending
-                except socket.timeout:
-                    print(f"[WARN] Timeout waiting for ACK from {addr} for packet {i}. Resending...")
-                    time.sleep(1)  # Delay before resending
+            # Print progress at 25%, 50%, 75%, and 100%
+            if (i + 1) % (total_packets // 4) == 0:
+                progress = ((i + 1) / total_packets) * 100
+                print(f"[INFO] Progress: {progress:.0f}% completed ({i + 1}/{total_packets} packets)")
 
         # Send end of transmission message
         conn.sendall(b'END')
-        print(f"[INFO] All packets sent. End of transmission signal sent to {addr}.")
+        print(f"[INFO] Transmission complete to {addr[0]}")
     except Exception as e:
-        print(f"[ERROR] Error handling client {addr}: {e}")
+        print(f"[ERROR] An error occurred: {e}")
     finally:
         # Close connection
         try:
@@ -61,7 +55,7 @@ def handle_client(conn, addr):
             conn.close()
         except Exception as e:
             print(f"[ERROR] Error closing connection from {addr}: {e}")
-        print(f"[INFO] Connection from {addr} has been closed.")
+        print("[INFO] Connection from {}:{} closed.".format(addr[0], addr[1]))
 
 # Main server function
 def start_server():
@@ -70,11 +64,12 @@ def start_server():
             server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             server_socket.bind((HOST, PORT))
             server_socket.listen()
-            print(f"[INFO] Server started, listening on {PORT}...")
+            print("[INFO] Server started")
+            print("[INFO] Listening on 0.0.0.0:5555")
+            print("[INFO] Waiting for connections...")
 
             while True:
                 conn, addr = server_socket.accept()
-                print(f"[INFO] Accepted connection from {addr}.")
                 executor.submit(handle_client, conn, addr)
 
 if __name__ == "__main__":

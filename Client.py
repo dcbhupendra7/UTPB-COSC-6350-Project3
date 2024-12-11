@@ -1,71 +1,77 @@
 import socket
 import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from crypto import aes_decrypt, keys
 
 # Constants
-SERVER_HOST = '127.0.0.1'
-SERVER_PORT = 5555
+SERVER_HOST = '127.0.0.1'  
+SERVER_PORT = 5555       
+EXPECTED_PAYLOAD = "Wireless Security-Project3-Quantum Crypto"  
+TIMEOUT = 600
 
-# Placeholder for decryption keys and AES decryption function
-keys = {0: "key0", 1: "key1", 2: "key2", 3: "key3"}
+BUFFER_SIZE = 1024
 
-def aes_decrypt(encrypted_message, key):
-    # Placeholder for actual AES decryption logic
-    return encrypted_message.decode()
+def decode_packet(encrypted_payload, key):
+    return aes_decrypt(encrypted_payload, key)
 
-# Function to connect to the server and receive packets
 def tcp_client():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-        try:
+    try:
+        print("[INFO] Connecting to server...")
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
+            client_socket.settimeout(TIMEOUT)
             client_socket.connect((SERVER_HOST, SERVER_PORT))
-            print("[INFO] Connected to 127.0.0.1:5555")
+            print("[INFO] Connected to server.")
 
-            total_packets = 6422616
-            successfully_decrypted = 0
-            final_unique_message = None
+            total_packets = int(client_socket.recv(1024).decode('utf-8'))
+            print(f"[INFO] Total packets to receive: {total_packets}")
+            client_socket.sendall(b"READY")  
 
-            print(f"[INFO] Expecting {total_packets} packets")
+            packets_received = 0
+            last_progress = 0
 
-            # Continuously receive encrypted packets
-            for current_packet in range(1, total_packets + 1):
+            while True:
                 encrypted_packet = client_socket.recv(1024)
+                if not encrypted_packet:
+                    print("[ERROR] Received an empty packet.")
+                    break
 
-                # Attempt decryption with each key
+                if encrypted_packet == b"END":
+                    print(f"[INFO] Transmission complete. Received all {total_packets} packets.")
+                    break
+
+                decrypted_message = None
+                used_key = None  # Track the key used for decryption
+
                 for key in keys.values():
                     try:
                         decrypted_message = aes_decrypt(encrypted_packet, key)
-                        if "The quick brown fox jumps over the lazy dog." in decrypted_message:
-                            # Store only the exact message once
-                            if final_unique_message is None:
-                                final_unique_message = "The quick brown fox jumps over the lazy dog."
-                                successfully_decrypted += 1
+                        if decrypted_message == EXPECTED_PAYLOAD:
+                            used_key = key  # Save the key used for successful decryption
                             break
                     except Exception:
                         continue
 
-                # Update and print progress
-                progress_points = [0.25, 0.5, 0.75, 1.0]
-                for point in progress_points:
-                    if current_packet == int(total_packets * point):
-                        percentage = point * 100
-                        print(f"\n[INFO] Progress: {percentage:.0f}% completed ({current_packet}/{total_packets} packets)")
-                        
-                        # Print unique message if available
-                        if final_unique_message:
-                            print(f"[INFO] Current decrypted message: {final_unique_message}")
-                
-                # Print progress bar
-                sys.stdout.write(f"\rProcessing: {current_packet/total_packets*100:.1f}% [{current_packet}/{total_packets}]")
-                sys.stdout.flush()
+                if decrypted_message:
+                    packets_received += 1
+                    client_socket.sendall(f"ACK:{packets_received - 1}".encode('utf-8'))
 
-            # Final status
-            print(f"\n\n[INFO] Successfully decrypted {successfully_decrypted}/{total_packets} packets.")
-            if final_unique_message:
-                print(f"[INFO] Final decrypted message: {final_unique_message}")
+                    # Calculate and show progress percentage
+                    current_progress = (packets_received / total_packets) * 100
+                    print(f"[INFO] Decrypted message: {decrypted_message}")
+                    print(f"[INFO] Decryption key: {used_key.hex()}")  # Show the decryption key
+                    print(f"[INFO] Progress: {current_progress:.2f}%")  # Show progress percentage
 
-        except Exception as e:
-            print(f"\n[ERROR] An error occurred: {e}")
-        finally:
-            print("\n[INFO] Connection closed.")
+                    if current_progress >= last_progress + 10:
+                        last_progress += 10
+                        print(f"[INFO] Client transmission progress: {last_progress}% completed.")
+                else:
+                    client_socket.sendall(b"NACK")
+
+    except Exception as e:
+        print(f"[ERROR] Client encountered an error: {e}")
+    finally:
+        print("[INFO] Connection closed.")
 
 if __name__ == "__main__":
     tcp_client()

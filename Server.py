@@ -1,113 +1,74 @@
 import socket
-from concurrent.futures import ThreadPoolExecutor
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from crypto import aes_encrypt, keys, decompose_byte
+import threading
+import struct
+from Crypto.Cipher import AES
+from Crypto import keys  
 
-# Constants
-HOST = '0.0.0.0' 
-PORT = 5555       
-TIMEOUT = 600     
-MAX_THREADS = 10  
-MAX_INVALID_PACKETS = 10  
-EXPECTED_PAYLOAD = "Wireless Security-Project3-Quantum Crypto"
+HOST = '127.0.0.1'
+PORT = 5555
 
-file_path = os.path.join(os.path.dirname(__file__), "risk.bmp")
+def get_crumbs(file_bytes, num_crumbs=4):
+    # Divide file into equal parts
+    crumb_size = len(file_bytes) // num_crumbs
+    crumbs = [file_bytes[i * crumb_size: (i + 1) * crumb_size] for i in range(num_crumbs - 1)]
+    crumbs.append(file_bytes[(num_crumbs - 1) * crumb_size:])  # Last chunk gets remaining bytes
+    return crumbs
 
-def encode_payload(payload, bit_pair):
-    if bit_pair not in keys:
-        print(f"[WARN] Missing key for bit pair value: {bit_pair}")
-        return None
-    key = keys[bit_pair]
-    return aes_encrypt(payload, key)
+def encrypt_with_key(plaintext, key):
+    cipher = AES.new(key, AES.MODE_ECB)
+    block_size = 16
+    pad_len = block_size - (len(plaintext) % block_size)
+    padded = plaintext + bytes([pad_len])*pad_len
+    return cipher.encrypt(padded)
 
-# Function to handle client connection
-def handle_client(conn, addr):
-    conn.settimeout(TIMEOUT)
-    print(f"[INFO] Connection established with {addr}.")
+def handle_client(conn, addr, crumbs):
+    # Send total number of crumbs
+    total_crumbs = len(crumbs)
+    conn.sendall(struct.pack('!I', total_crumbs))
+    print(f"[SERVER] Sent total crumb count: {total_crumbs}")
 
-    try:
-        with open(file_path, "rb") as file:
-            crumbs = []
-            byte = file.read(1)
-            while byte:
-                byte_value = byte[0]
-                crumbs.extend(decompose_byte(byte_value))
-                byte = file.read(1)
-
-        total_packets = len(crumbs)
-        print(f"[INFO] Sending {total_packets} packets to client {addr}.")
-
-        # Send the total number of packets to the client
-        conn.sendall(str(total_packets).encode())
-        client_ack = conn.recv(1024).decode('utf-8')
-
-        if client_ack != "READY":
-            print(f"[ERROR] Client {addr} not ready. Closing connection.")
-            return
-
-        packets_sent = 0
-        last_progress = 0
-
-        # Send packets with progress tracking 
+    while True:
+        print("[SERVER] Starting a new transmission pass of all crumbs...")
         for i, crumb in enumerate(crumbs):
-            try:
-                bit_pair_value = crumb
-                if bit_pair_value not in keys:
-                    print(f"[WARN] Missing key for bit pair value: {bit_pair_value}. Skipping packet {i}.")
-                    continue
+            key = keys[f'{i:02b}']  # Use key '00', '01', '10', '11' for crumbs
+            ciphertext = encrypt_with_key(crumb, key)
+            length = len(ciphertext)
 
-                key = keys[bit_pair_value]
-                encrypted_packet = encode_payload(EXPECTED_PAYLOAD, bit_pair_value)
+            print(f"[SERVER] Sending crumb {i+1}/{total_crumbs} with key '{i:02b}'")
+            conn.sendall(struct.pack('!I', length))
+            conn.sendall(ciphertext)
 
-                ack_received = False
-                while not ack_received:
-                    conn.sendall(encrypted_packet)
-                    try:
-                        ack = conn.recv(1024).decode('utf-8')
-                        if ack == f"ACK:{i}":
-                            packets_sent += 1
-                            current_progress = (packets_sent / total_packets) * 100
+        print("[SERVER] All crumbs for this pass sent. Waiting for client fraction...")
+        data = conn.recv(8)
+        if not data:
+            print("[SERVER] No fraction received, assuming client disconnected.")
+            break
 
-                            # Print progress at 10%
-                            if current_progress >= last_progress + 10:
-                                last_progress += 10
-                                print(f"[INFO] Server progress: {last_progress}% completed ({packets_sent}/{total_packets} packets)")
+        fraction = struct.unpack('!d', data)[0]
+        print(f"[SERVER] Received fraction from client: {fraction}")
 
-                            ack_received = True
-                        else:
-                            print(f"[WARN] Unexpected response from client: {ack}. Resending packet {i}...")
-                    except socket.timeout:
-                        print(f"[WARN] Timeout waiting for ACK for packet {i}. Resending...")
-            except KeyError as e:
-                print(f"[ERROR] Key error for bit pair value {bit_pair_value}: {e}. Skipping packet {i}.")
-                continue
+        if fraction >= 1.0:
+            print("[SERVER] Client has fully decoded the file. Ending connection.")
+            break
 
-        conn.sendall(b"END")
-        print(f"[INFO] Server progress: 100% completed ({total_packets}/{total_packets} packets).")
+    conn.close()
+    print("[SERVER] Connection closed.")
 
-    except Exception as e:
-        print(f"[ERROR] Error handling client {addr}: {e}")
+def main():
+    with open('textFile.txt', 'rb') as f:
+        file_bytes = f.read()
 
-    finally:
-        try:
-            conn.shutdown(socket.SHUT_RDWR)
-            conn.close()
-        except Exception:
-            pass
-        print(f"[INFO] Connection from {addr} has been closed.")
+    crumbs = get_crumbs(file_bytes)  # Split file into 4 crumbs
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind((HOST, PORT))
+    s.listen(5)
+    print("[SERVER] Listening on", (HOST, PORT))
 
-def start_server():
-    print(f"[INFO] Server starting on {HOST}:{PORT}")
-    with ThreadPoolExecutor(max_workers=MAX_THREADS) as pool:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            server_socket.bind((HOST, PORT))
-            server_socket.listen()
-            print(f"[INFO] Server is listening on port {PORT}...")
-            while True:
-                conn, addr = server_socket.accept()
-                pool.submit(handle_client, conn, addr)
+    while True:
+        conn, addr = s.accept()
+        print("[SERVER] Connection from", addr)
+        t = threading.Thread(target=handle_client, args=(conn, addr, crumbs))
+        t.start()
 
-if __name__ == "__main__":
-    start_server()
+if __name__ == '__main__':
+    main()
